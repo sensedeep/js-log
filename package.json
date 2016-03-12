@@ -1,0 +1,24 @@
+{
+    "name": "node-log",
+    "description": "Node logging",
+    "version": "0.1.0",
+    "keywords": [
+        "node",
+        "log"
+    ],
+    "author": {
+        "name": "Michael O'Brien",
+        "email": "mob@emobrien.com"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/sensedeep/node-log.git"
+    },
+    "bugs": {
+        "url": "http://github.com/sensedeep/node-log/issues"
+    },
+    "license": "UNLICENSED",
+    "pak": {
+        "export": "*.js"
+    }
+}
