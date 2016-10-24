@@ -1,7 +1,7 @@
 {
-    "name": "node-log",
+    "name": "js-log",
     "description": "Node logging",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "keywords": [
         "node",
         "log"
@@ -12,12 +12,13 @@
     },
     "repository": {
         "type": "git",
-        "url": "https://github.com/sensedeep/node-log.git"
+        "url": "https://github.com/sensedeep/js-log.git"
     },
     "bugs": {
-        "url": "http://github.com/sensedeep/node-log/issues"
+        "url": "http://github.com/sensedeep/js-log/issues"
     },
     "license": "UNLICENSED",
+    "main": "index.js",
     "pak": {
         "export": "*.js"
     }

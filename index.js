@@ -1,113 +1,156 @@
 /*
-    node-log - Simple, fast logging in node
+    log.js - Simple, fast logging
  */
 
-import Fs from 'fs';
-import Os from 'os';
-import Dates from './dates';
-
-var dates = new Dates
-
-export default class Log {
-
-    constructor(options = {}) {
-        this.stream = null
-        this.mode = options.mode
-        this.output = []
-        if (typeof options == 'string') {
-            this.path = options
-        } else if (options.path) {
-            this.path = options.path
-        } else {
-            this.path = 'stdout'
-        }
-        this.setTrace(options.trace)
-        this.format = options.format
-        this.open()
+export class Log {
+    constructor(options) {
         global.log = this
-    }
-
-    open() {
-        if (this.path == 'stdout') {
-            this.stream = process.stdout
-            this.console = true
-        } else if (this.path == 'stderr') {
-            this.stream = process.stderr
-            this.console = true
-        } else {
-            this.stream = Fs.createWriteStream(this.path)
+        this.loggers = []
+        this.output = []
+        this.type = { all: true }
+        this.from = { all: true }
+        if (options == 'console') {
+            this.addLogger(new DefaultLogger)
+            this.sync = true
         }
     }
 
-    close() {
-        if (this.stream) {
-            this.stream.end('\n')
-        }
+    addLogger(logger) {
+       this.loggers.push(logger)
     }
 
-    setTrace(items) {
-        let trace = this.tags = {}
-        if (items) {
-            if (typeof items == 'string') {
-                items = [items]
+    filter(type, from) {
+        this.type = {}
+        if (type) {
+            if (typeof type == 'string') {
+                type = [type]
             }
-            for (let item of items) {
-                trace[item] = true
+            for (let t of type) {
+                this.type[t] = true
             }
         }
+        this.from = {}
+        if (from) {
+            if (typeof from == 'string') {
+                from = [from]
+            }
+            for (let f of from) {
+                this.from[f] = true
+            }
+        }
     }
 
-    error(...msg) {
-        this.write('ERROR', ...msg)
+    debug(from, ...msg) {
+        this.write('debug', from, ...msg)
     }
 
-    fatal(...msg) {
-        this.write('ERROR', ...msg)
-        process.nextTick(function() { print('Exiting ...') ; process.exit(1) })
+    error(from, ...msg) {
+        this.write('error', from, ...msg)
     }
 
-    info(...msg) {
-        this.write('INFO', ...msg)
+    exception(from, e) {
+        this.write('error', from, (e && e.stack) ? e.stack : e)
     }
 
-    trace(mod, ...msg) {
-        if (!this.tags || this.tags[mod] || this.tags.all) {
-            let items = []
-            for (let item of msg) {
-                if (typeof item == 'string') {
-                    items.push(item)
-                } else {
-                    items.push(serialize(item, 1))
+    info(from, ...msg) {
+        this.write('info', from, ...msg)
+    }
+
+    trace(from, ...msg) {
+        this.write('trace', from, ...msg)
+    }
+
+    write(type, from, ...msg) {
+        if (!(this.type[type] || this.type.all)) {
+            return;
+        }
+        if (this.type['!' + type]) {
+            return;
+        }
+        if (!(this.from[from] || this.from.all)) {
+            return;
+        }
+        if (this.from['!' + from]) {
+            return;
+        }
+        msg = this.prepMsg(msg)
+        this.output.push([type, from, msg])
+        if (this.sync) {
+            this.flush()
+        } else if (!this.scheduled) {
+            this.scheduled = true
+            let self = this
+            if (global.process && global.process.nextTick) {
+                process.nextTick(function() {
+                    self.flush()
+                })
+            } else {
+                setTimeout(function() {
+                    self.flush()
+                }, 0)
+            }
+        }
+    }
+
+    flush() {
+        this.scheduled = false
+        if (this.output.length > 0) {
+            try {
+                for (let logger of this.loggers) {
+                    logger.write(this.output)
                 }
+            } catch (e) {
+                console.log(e)
             }
-            this.write(mod.toUpperCase(), items.join(' '))
+            this.output = []
         }
     }
 
-    write(tag, ...msg) {
-        let d = Date()
-        let date = d.hour
-        let line = msg.join(' ')
-        if (this.format) {
-            line = this.format.
-                replace('%A', app.name).
-                replace('%D', dates.format(Date.now(), 'syslog')).
-                replace('%H', Os.hostname).
-                replace('%P', process.pid).
-                replace('%T', tag) + ' ' +
-                line
+    prepMsg(msg) {
+        let items = []
+        for (let item of msg) {
+            if (typeof item == 'string') {
+                items.push(item)
+            } else if (item instanceof Error) {
+                items.push(item.toString())
+            } else {
+                items.push(JSON.stringify(item, null, 4))
+            }
         }
-        this.output.push(line)
-        if (this.console) {
-            console.log(line)
-        } else {
-            process.nextTick(() => {
-                if (this.output.length > 0) {
-                    this.stream.write(this.output.join('\n') + '\n')
-                    this.stream.cork()
-                    this.output = []
+        return items.join(' ')
+    }
+
+    addBrowserExceptions() {
+        let self = this
+        if (typeof window != 'undefined') {
+            global.onerror = function(message, source, line, column, error) {
+                self.error('callback', message, (error ? error.stack : '') + ' from ' + source  + ':' +
+                    line + ':' + column)
+            }
+            global.onunhandledrejection = (rejection) => {
+                let message = `Unhandled promise rejection : ${rejection.message}`
+                if (rejection && rejection.reason && rejection.reason.stack) {
+                    message += `\r${rejection.reason.stack}`
                 }
+                self.error('callback', message)
+           }
+        }
+    }
+
+    addNodeExceptions() {
+        let self = this
+        if (typeof process != 'undefined') {
+            process.on("uncaughtException", function(err) {
+                self.error('callback', err)
             })
+        }
+    }
+}
+
+export class DefaultLogger {
+    write(output) {
+        for (let item of output) {
+            console.log(item[0], item[1] + ':', item[2])
         }
     }
 }
