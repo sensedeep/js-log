@@ -49,7 +49,17 @@ export class Log {
     }
 
     exception(from, e) {
-        this.write('error', from, (e && e.stack) ? e.stack : e)
+        let msg = []
+        if (e.message) {
+            msg.push(e.message)
+        }
+        if (e.errors) {
+            msg.push(JSON.stringify(e.errors))
+        }
+        if (e.stack) {
+            msg.push(e.stack)
+        }
+        this.write('error', from, msg.join('\n'))
     }
 
     info(from, ...msg) {
