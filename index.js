@@ -59,7 +59,10 @@ export class Log {
         if (e.stack) {
             msg.push(e.stack)
         }
-        this.write('error', from, msg.join('\n'))
+        if (typeof e == 'string') {
+            msg.push(e)
+        }
+        this.write('exception', from, msg.join('\n'))
     }
 
     info(from, ...msg) {
