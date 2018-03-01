@@ -62,7 +62,7 @@ export class Log {
         if (typeof e == 'string') {
             msg.push(e)
         }
-        this.write('exception', from, msg.join('\n'))
+        this.write('error', from, msg.join('\n'))
     }
 
     info(from, ...msg) {
