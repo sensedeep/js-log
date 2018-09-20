@@ -140,7 +140,7 @@ export class Log {
     }
 
     info(message, context, ops) {
-        if (context != undefined && typeof context == 'string') {
+        if (context != undefined && typeof context == 'string' && typeof message == 'string') {
             ({context, message, ops} = this.legacy(message, context, ops))
         }
         this.submit('info', message, context, ops)
@@ -170,28 +170,6 @@ export class Log {
         for (let logger of this.loggers) {
             logger.write(params)
         }
-    }
-
-    filter(params) {
-        let top = this.top
-        let {context} = params
-        params.context = context = Object.assign({}, this.context, context)
-        let level = top.level
-
-        if (top.filters) {
-            for (let [key, item] of top.filterEntries) {
-                let thisLevel = (context[key]) ? item[context[key]] : -1
-                if (thisLevel < 0) {
-                    return false
-                } else {
-                    level = Math.max(level, thisLevel)
-                }
-            }
-        }
-        if (context.level > level) {
-            return false
-        }
-        return true
     }
 
     prep(params) {
@@ -229,21 +207,45 @@ export class Log {
         if (Array.isArray(context.message)) {
             context.message = context.message.join(' ')
         }
+        params.context = Object.assign({}, this.context, context)
+    }
+
+    /*
+        Filter is called by Loggers
+     */
+    filter(params) {
+        let top = this.top
+        let {context} = params
+        let level = top.level
+
+        if (top.filters) {
+            for (let [key, item] of top.filterEntries) {
+                let thisLevel = (context[key]) ? item[context[key]] : -1
+                if (thisLevel < 0) {
+                    return false
+                } else {
+                    level = Math.max(level, thisLevel)
+                }
+            }
+        }
+        if (context.level > level) {
+            return false
+        }
+        return true
     }
 
     addBrowserExceptions() {
         let self = this
         if (typeof window != 'undefined') {
-            global.onerror = function(message, source, line, column, error) {
-                self.error('callback', message, (error ? error.stack : '') + ' from ' + source  + ':' +
-                    line + ':' + column)
+            global.onerror = function(message, source, line, column, err) {
+                self.exception(message, err)
             }
             global.onunhandledrejection = (rejection) => {
                 let message = `Unhandled promise rejection : ${rejection.message}`
                 if (rejection && rejection.reason && rejection.reason.stack) {
                     message += `\r${rejection.reason.stack}`
                 }
-                self.error('callback', message)
+                self.error(message)
            }
         }
     }
@@ -252,7 +254,7 @@ export class Log {
         let self = this
         if (typeof process != 'undefined') {
             process.on("uncaughtException", function(err) {
-                self.error('callback', err)
+                self.exception('Uncaught exception', err)
             })
         }
     }
@@ -262,9 +264,14 @@ export class DefaultLogger {
     write(params) {
         let {context, ops} = params
         let {message, source, type} = context
-        if (context.error || context.type == 'trace') {
+        if (context.exception) {
+            console.log(`${source}: ${type}: ${message}`)
+            console.log(context.exception)
+
+        } else if (context.error || context.type == 'trace') {
             console.log(`${source}: ${type}: ${message}`)
             console.log(JSON.stringify(context, null, 4) + '\n')
+
         } else {
             console.log(`${source}: ${type}: ${message}`)
         }
