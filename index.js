@@ -1,13 +1,20 @@
 /*
     log.js - Simple, fast logging
 
-    usage(message, context, operations)
+    TODO: would be good to have a wrapper for ExpressJS functions that generated a correlation-id and included HTTP headers etc.
 
-        debug       - Current dev activity
-        error       - Any error
-        info        - Any non-error information
-        trace       - Persistent embedded (disabled by default) internal debug information
-        exception   - usage(message, err, context, operations)
+    import {Log} from 'js-log'
+
+    let log = new Log(options, context)
+    child = log.child({source: 'aws'})
+
+    info(message, context, operations)
+    error(message, context, operations)
+    info(message, context, operations)
+    trace(message, context, operations)
+    exception(message, err, context, operations)
+
+    usage(message, context, operations)
 
     Operations
         alert       - Create Alert record
@@ -20,7 +27,7 @@
     Operation parameters
         email       - Destination of notification
         expires     - When alert expires
-        internal    - Extra internal information never displayed to the user
+        internal    - Extra internal information never contexted to the user
         message     - If supplied, the original message param becomes params.subject
         priority    - Alert priority
         subject     - Message subject (alert, notice)
@@ -43,6 +50,8 @@
         details     - Extra information not part of the message
  */
 
+var defaultLog
+
 export class Log {
     constructor(options, context = {}) {
         this.context = context
@@ -51,6 +60,7 @@ export class Log {
         this.filters = null
         this.top = this
         this.level = 0
+        defaultLog = this
         if (options == 'console') {
             this.addLogger(new DefaultLogger)
         }
@@ -97,71 +107,43 @@ export class Log {
         this.context = Object.assign(this.context, context)
     }
 
-    /*
-        source, message, context
-        WARNING: legacy will modify submitted contexts
-     */
-    legacy(source, context, ops) {
-        let message = context
-        context = ops || {}
-        ops = {}
-        for (let field of ['alert', 'bug', 'log', 'notify', 'trail']) {
-            if (context[field]) {
-                ops[field] = context[field]
-                context[field] = undefined
-            }
-        }
-        context.source = source
-        context.legacy = true
-        return {context, message, ops}
-    }
-
     debug(message, context, ops) {
-        if (context != undefined && typeof context == 'string') {
-            ({context, ops} = this.legacy(message, context, ops))
-        }
         this.submit('debug', message, context, ops)
     }
 
     error(message, context, ops) {
-        if (message.indexOf("Cannot read property 'split'") >= 0) {
+        //  MOB - why?
+        if (message && message.indexOf("Cannot read property 'split'") >= 0) {
             context = context || {}
             context.stack = (new Error(message)).stack
-        }
-        if (context != undefined && typeof context == 'string') {
-            ({context, message, ops} = this.legacy(message, context, ops))
         }
         this.submit('error', message, context, ops)
     }
 
     exception(message, err, context = {}, ops = {}) {
+        context = Object.assign({}, context)
         context.exception = err
         this.submit('exception', message, context, ops)
     }
 
     info(message, context, ops) {
-        if (context != undefined && typeof context == 'string' && typeof message == 'string') {
-            ({context, message, ops} = this.legacy(message, context, ops))
-        }
         this.submit('info', message, context, ops)
     }
 
     trace(message, context = {}, ops = {}) {
-        if (context != undefined && typeof context != 'object') {
-            ({context, message, ops} = this.legacy(message, context, ops))
-        }
-        context.level = context.level || 5
+        context.level = context.level != null ? context.level : 5
         this.submit('trace', message, context, ops)
     }
 
     submit(type, message, context = {}, ops = {}) {
+        context = Object.assign({}, context)
         if (context.message) {
             context.subject = message
         } else {
             context.message = message
         }
         context.type = type
-        context.level = context.level || 0
+        context.level = context.level != null ? context.level : 0
         this.write({context, ops})
     }
 
@@ -198,7 +180,7 @@ export class Log {
             exception.message = err.message
             exception.code = err.code
         }
-        //  MOB - push back into application
+        //  MOB - push back into application -- should not modify ops
         if (context.template) {
             ops.notify = true
         }
@@ -264,16 +246,19 @@ export class DefaultLogger {
     write(params) {
         let {context, ops} = params
         let {message, source, type} = context
-        if (context.exception) {
-            console.log(`${source}: ${type}: ${message}`)
-            console.log(context.exception)
+        if (ops.log !== false && defaultLog.filter(params)) {
+            source = source || (app.config ? app.config.name : 'app')
+            let exception = context.exception
+            if (exception) {
+                console.log(`${source}: ${type}: ${message}: ${exception.message}: ${exception.code}`)
 
-        } else if (context.error || context.type == 'trace') {
-            console.log(`${source}: ${type}: ${message}`)
-            console.log(JSON.stringify(context, null, 4) + '\n')
+            } else if (context.error || context.type == 'trace') {
+                console.log(`${source}: ${type}: ${message}`)
+                console.log(JSON.stringify(context, null, 4) + '\n')
 
-        } else {
-            console.log(`${source}: ${type}: ${message}`)
+            } else {
+                console.log(`${source}: ${type}: ${message}`)
+            }
         }
     }
 }
