@@ -1,7 +1,7 @@
 {
     "name": "js-log",
     "description": "Node logging",
-    "version": "0.1.3",
+    "version": "1.0.0",
     "keywords": [
         "node",
         "log"
@@ -17,8 +17,16 @@
     "bugs": {
         "url": "http://github.com/sensedeep/js-log/issues"
     },
-    "license": "UNLICENSED",
+    "licenses": [
+        {
+            "type": "GPL",
+            "url": "http://www.gnu.org/licenses/gpl-2.0.html"
+        },
+        {
+            "type": "Commercial",
+            "url": "https://embedthis.com/licensing/"
+        }
+    ],
     "main": "index.js",
-    "export": "*.js",
     "origin": "sensedeep/js-log"
 }

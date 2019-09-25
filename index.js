@@ -52,7 +52,7 @@
 
 var defaultLog
 
-export class Log {
+export default class Log {
     constructor(options, context = {}) {
         this.context = context
         this.options = options
@@ -62,8 +62,10 @@ export class Log {
         this.level = 0
         defaultLog = this
         if (options == 'console') {
-            this.addLogger(new DefaultLogger)
+            this.addLogger(new DefaultLogger(options, context))
+            this.addBrowserExceptions()
         }
+        this.setFilter(options)
     }
 
     child(context) {
@@ -242,12 +244,16 @@ export class Log {
     }
 }
 
-export class DefaultLogger {
+class DefaultLogger {
+    constructor(options, context) {
+        this.options = options
+        this.context = context
+    }
     write(params) {
         let {context, ops} = params
         let {message, source, type} = context
         if (ops.log !== false && defaultLog.filter(params)) {
-            source = source || (app.config ? app.config.name : 'app')
+            source = source || (options && options.name ? options.name : 'app')
             let exception = context.exception
             if (exception) {
                 console.log(`${source}: ${type}: ${message}: ${exception.message}: ${exception.code}`)
