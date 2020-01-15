@@ -6,9 +6,18 @@
     import {Log} from 'js-log'
 
     let log = new Log(options, context)
-    child = log.child({source: 'aws'})
+    child = log.child({module: 'aws'})
+
+    log.setFilters([
+        field: 'source',
+        levels: {
+            'aws': 5,
+            'default': 1
+        }
+    ])
 
     info(message, context, operations)
+    data(message, context, operations)
     error(message, context, operations)
     info(message, context, operations)
     trace(message, context, operations)
@@ -21,7 +30,6 @@
         bug         - Create a Bug record
         log         - Set to false to disable logging
         notify      - Notify user via email template
-                      MOB - would be great to be able to notify via 'chat'
         trail       - Add to account trail
 
     Operation parameters
@@ -33,10 +41,10 @@
         subject     - Message subject (alert, notice)
         template    - Notification (email) template (implies notify)
 
-    Context Fields
-        source      - Originating source module
+    Example Context Fields
+        module      - Originating source module
         time        - Time of event
-        type        - debug|error|info|trace
+        type        - data|debug|error|info|trace
         req         - Request correlation ID
         sessionId   - Cookie session ID
         accountId   - Account ID
@@ -52,61 +60,83 @@
 
 var defaultLog
 
+const DefaultFilters = [{
+    field: 'source', 
+    levels: {
+        'default': '1'
+    }
+}]
+
+const DefaultTypes = {
+    "error": 0,
+    "exception": 0,
+    "info": 1,
+    "data": 2,
+    "debug": 3,
+    "trace": 4
+}
+
 export default class Log {
-    constructor(options, context = {}) {
+    constructor(options = {}, context = {}) {
         this.context = context
         this.options = options
+        this.filters = DefaultFilters
+        this.types = DefaultTypes
         this.loggers = []
-        this.filters = null
-        this.top = this
-        this.level = 0
         defaultLog = this
-        if (options == 'console') {
-            this.addLogger(new DefaultLogger(options, context))
-            this.addBrowserExceptions()
+        if (options.endpoint == 'json') {
+            this.addLogger(new JsonLogger(options, context))
+        } else if (options.endpoint == 'console') {
+            this.addLogger(new ConsoleLogger(options, context))
         }
-        this.setFilter(options)
+        this.addUncaughtExceptions()
+        this.setFilters(options)
     }
 
     child(context) {
-        context = Object.assign({}, this.context, context)
+        context = context ? Object.assign({}, this.context, context) : this.context
         let log = new Log(this.options, context)
+        log.filters = null
         log.loggers = this.loggers.slice(0)
-        log.top = this.top
+        log.types = this.types
+        /*
+        if (config) {
+            log.setFilters({filters: config.filters || this.filters, types: config.types || this.types})
+        } else {
+            log.setFilters({filters: this.filters, types: this.types})
+        } */
+        log.parent = this
         return log
+    }
+
+    get config() {
+        return {
+            types: this.types,
+            filters: this.filters,
+            context: this.context,
+        }
     }
 
     addLogger(logger) {
        this.loggers.push(logger)
     }
 
-    setFilter(params) {
-        let top = this.top
-        top.level = params.level || top.level
-        if (!params.filter) {
-            return
+    setFilters(params) {
+        if (params.types) {
+            this.types = params.types
         }
-        top.filters = {}
-        if (typeof params.filter == 'string') {
-            /*
-                --log key=value:level,value:-1/... (Level defaults to 4)
-             */
-            for (let match of params.filter.split('/')) {
-                let [key, values] = match.split('=')
-                let item = top.filters[key] = {}
-                for (let v of values.split(',')) {
-                    let [value, level] = v.split(':')
-                    item[value] = level || 4
-                }
-            }
-        } else {
-            top.filters = params.filters
+        this.filters = params.filters
+        if (!this.filters) {
+            this.filters = DefaultFilters
         }
-        top.filterEntries = Object.entries(top.filters || {})
     }
 
     addContext(context) {
         this.context = Object.assign(this.context, context)
+    }
+
+    data(message, context, ops) {
+        this.submit('data', message, context, ops)
     }
 
     debug(message, context, ops) {
@@ -114,17 +144,10 @@ export default class Log {
     }
 
     error(message, context, ops) {
-        //  MOB - why?
-        if (message && message.indexOf("Cannot read property 'split'") >= 0) {
-            context = context || {}
-            context.stack = (new Error(message)).stack
-        }
         this.submit('error', message, context, ops)
     }
 
-    exception(message, err, context = {}, ops = {}) {
-        context = Object.assign({}, context)
-        context.exception = err
+    exception(message, context = {}, ops = {}) {
         this.submit('exception', message, context, ops)
     }
 
@@ -133,7 +156,6 @@ export default class Log {
     }
 
     trace(message, context = {}, ops = {}) {
-        context.level = context.level != null ? context.level : 5
         this.submit('trace', message, context, ops)
     }
 
@@ -145,14 +167,20 @@ export default class Log {
             context.message = message
         }
         context.type = type
-        context.level = context.level != null ? context.level : 0
+        context.level = context.level != null ? context.level : (this.types[type] || 0)
+        if (context.at === true) {
+            try {
+                // context.at = (new Error('stack')).stack.split('\n')[3].trim().replace(/^at trace..|:[0-9]*\)$/g, '')
+                context.at = (new Error('stack')).stack.split('\n')[3].trim().replace(/^.*webpack:\/|:[0-9]*\)$/g, '')
+            } catch(err) {}
+        }
         this.write({context, ops})
     }
 
     write(params) {
         this.prep(params)
         for (let logger of this.loggers) {
-            logger.write(params)
+            logger.write(this, params)
         }
     }
 
@@ -182,12 +210,10 @@ export default class Log {
             exception.message = err.message
             exception.code = err.code
         }
-        //  MOB - push back into application -- should not modify ops
         if (context.template) {
             ops.notify = true
         }
         context.time = new Date()
-        context.cutoff = this.top.level
         if (Array.isArray(context.message)) {
             context.message = context.message.join(' ')
         }
@@ -197,20 +223,30 @@ export default class Log {
     /*
         Filter is called by Loggers
      */
-    filter(params) {
-        let top = this.top
+    applyFilters(params) {
         let {context} = params
-        let level = top.level
+        let level
 
-        if (top.filters) {
-            for (let [key, item] of top.filterEntries) {
-                let thisLevel = (context[key]) ? item[context[key]] : -1
-                if (thisLevel < 0) {
-                    return false
-                } else {
-                    level = Math.max(level, thisLevel)
+        let filters = this.filters
+        let superior = this.parent
+        while (!filters && superior) {
+            filters = superior.filters
+            superior = superior.parent
+        }
+        if (filters) {
+            for (let filter of filters) {
+                let item = context[filter.field] || 'default'
+                level = filter.levels[item]
+                if (level === null) {
+                    level = filter.levels['default']
+                }
+                if (level != null) {
+                    break
                 }
             }
+        }
+        if (level == null) {
+            level = 0
         }
         if (context.level > level) {
             return false
@@ -218,10 +254,10 @@ export default class Log {
         return true
     }
 
-    addBrowserExceptions() {
+    addUncaughtExceptions() {
         let self = this
         if (typeof window != 'undefined') {
-            global.onerror = function(message, source, line, column, err) {
+            global.onerror = function(message, module, line, column, err) {
                 self.exception(message, err)
             }
             global.onunhandledrejection = (rejection) => {
@@ -244,26 +280,50 @@ export default class Log {
     }
 }
 
-class DefaultLogger {
+class JsonLogger {
     constructor(options, context) {
         this.options = options
         this.context = context
     }
-    write(params) {
+
+    write(log, params) {
         let {context, ops} = params
-        let {message, source, type} = context
-        if (ops.log !== false && defaultLog.filter(params)) {
-            source = source || (options && options.name ? options.name : 'app')
+        let {message, module, type} = context
+        if (ops.log !== false && log.applyFilters(params)) {
+            try {
+                console.log(JSON.stringify(context, null, 4) + '\n')
+            } catch (err) {
+                console.log(JSON.stringify({message, module, type}, null, 4) + '\n')
+            }
+        }
+    }
+}
+
+class ConsoleLogger {
+    constructor(options, context) {
+        this.options = options
+        this.context = context
+    }
+
+    write(log, params) {
+        let options = this.options
+        let {context, ops} = params
+        let {message, module, type} = context
+        if (ops.log !== false && log.applyFilters(params)) {
+            module = module || (options && options.name ? options.name : 'app')
             let exception = context.exception
             if (exception) {
-                console.log(`${source}: ${type}: ${message}: ${exception.message}: ${exception.code}`)
+                console.log(`${module}: ${type}: ${message}: ${exception.message}: ${exception.code}`)
 
             } else if (context.error || context.type == 'trace') {
-                console.log(`${source}: ${type}: ${message}`)
-                console.log(JSON.stringify(context, null, 4) + '\n')
-
+                console.log(`${module}: ${type}: ${message}`)
+                try {
+                    console.log(JSON.stringify(context, null, 4) + '\n')
+                } catch (err) {
+                    console.log(`Exception in emitting context`)
+                }
             } else {
-                console.log(`${source}: ${type}: ${message}`)
+                console.log(`${module}: ${type}: ${message}`)
             }
         }
     }
