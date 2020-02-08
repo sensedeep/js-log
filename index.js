@@ -61,7 +61,7 @@
 var defaultLog
 
 const DefaultFilters = [{
-    field: 'source', 
+    field: 'source',
     levels: {
         'default': '1'
     }
@@ -237,7 +237,7 @@ export default class Log {
             for (let filter of filters) {
                 let item = context[filter.field] || 'default'
                 level = filter.levels[item]
-                if (level === null) {
+                if (level == null) {
                     level = filter.levels['default']
                 }
                 if (level != null) {
