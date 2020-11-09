@@ -21,7 +21,7 @@
     error(message, context, operations)
     info(message, context, operations)
     trace(message, context, operations)
-    exception(message, err, context, operations)
+    exception(message, context, operations)
 
     usage(message, context, operations)
 
@@ -86,7 +86,7 @@ export default class Log {
         defaultLog = this
         if (options.endpoint == 'json') {
             this.addLogger(new JsonLogger(options, context))
-        } else if (options.endpoint == 'console') {
+        } else {
             this.addLogger(new ConsoleLogger(options, context))
         }
         this.addUncaughtExceptions()
@@ -148,6 +148,7 @@ export default class Log {
     }
 
     exception(message, context = {}, ops = {}) {
+        // debugger;
         this.submit('exception', message, context, ops)
     }
 
@@ -188,24 +189,27 @@ export default class Log {
         let {context, ops} = params
         let message = context.message
 
-        if (context instanceof Error) {
+        if (message instanceof Error) {
+            context.exception = message
+
+        } else if (context instanceof Error) {
             let exception = context
             context = {exception}
-            context.message = exception.message
 
-        } else if (message instanceof Error) {
-            let exception = message
-            context.exception = exception
-            context.message = exception.message
+        } else if (context.err instanceof Error) {
+            context.exception = context.err
+            delete context.err
 
         } else if (typeof message != 'string') {
             context.message = JSON.stringify(message)
         }
         if (context.exception) {
+            //  MOB - why?
             let err = context.exception
             let exception = context.exception = Object.assign({}, err)
             if (err.stack) {
-                exception.stack = err.stack.split('\n').map(s => s.trim())
+                // exception.stack = err.stack.split('\n').map(s => s.trim())
+                exception.stack = err.stack
             }
             exception.message = err.message
             exception.code = err.code
@@ -248,10 +252,7 @@ export default class Log {
         if (level == null) {
             level = 0
         }
-        if (context.level > level) {
-            return false
-        }
-        return true
+        return (context.level > level) ? false : true
     }
 
     addUncaughtExceptions() {
@@ -289,11 +290,18 @@ class JsonLogger {
     write(log, params) {
         let {context, ops} = params
         let {message, module, type} = context
-        if (ops.log !== false && log.applyFilters(params)) {
-            try {
-                console.log(JSON.stringify(context, null, 4) + '\n')
-            } catch (err) {
-                console.log(JSON.stringify({message, module, type}, null, 4) + '\n')
+        if (ops.log !== false) {
+            let result = log.applyFilters(params)
+            if (result) {
+                try {
+                    if (context.type == 'error' || context.type == 'exception') {
+                        console.error(JSON.stringify(context) + '\n')
+                    } else {
+                        console.log(JSON.stringify(context) + '\n')
+                    }
+                } catch (err) {
+                    console.log(JSON.stringify({message, module, type}) + '\n')
+                }
             }
         }
     }
@@ -311,20 +319,32 @@ class ConsoleLogger {
         let {message, module, type} = context
         if (ops.log !== false && log.applyFilters(params)) {
             module = module || (options && options.name ? options.name : 'app')
+            let time = this.getTime()
             let exception = context.exception
-            if (exception) {
-                console.log(`${module}: ${type}: ${message}: ${exception.message}: ${exception.code}`)
+            try {
+                if (exception) {
+                    console.error(`${time}: ${module}: ${type}: ${message}: ${exception.message}`)
+                    console.error(exception.stack)
 
-            } else if (context.error || context.type == 'trace') {
-                console.log(`${module}: ${type}: ${message}`)
-                try {
+                } else if (context.type == 'error') {
+                    console.error(`${time}: ${module}: ${type}: ${message}`)
+                    console.error(JSON.stringify(context, null, 4) + '\n')
+
+                } else if (context.type == 'trace') {
+                    console.log(`${time}: ${module}: ${type}: ${message}`)
                     console.log(JSON.stringify(context, null, 4) + '\n')
-                } catch (err) {
-                    console.log(`Exception in emitting context`)
+
+                } else {
+                    console.log(`${time}: ${module}: ${type}: ${message}`)
                 }
-            } else {
-                console.log(`${module}: ${type}: ${message}`)
+            } catch (err) {
+                console.log(`Exception in emitting log message: ${message}`)
             }
         }
+    }
+
+    getTime() {
+        let now = new Date()
+        return `${zpad(now.getHours(), 2)}:${zpad(now.getMinutes(), 2)}:${zpad(now.getSeconds(), 2)}`
     }
 }
