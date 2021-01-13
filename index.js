@@ -8,6 +8,7 @@
     let log = new Log(options, context)
     child = log.child({module: 'aws'})
 
+    log.setLevels({ddb: 3})
     log.setFilters([
         field: 'source',
         levels: {
@@ -129,6 +130,16 @@ export default class Log {
         if (!this.filters) {
             this.filters = DefaultFilters
         }
+        if (!Array.isArray(this.filters)) {
+            this.filters = [this.filters]
+        }
+    }
+
+    setLevels(levels) {
+        if (!this.filters) {
+            this.filters = Object.clone(DefaultFilters)
+        }
+        this.filters[0].levels = levels
     }
 
     addContext(context) {
@@ -336,6 +347,7 @@ class ConsoleLogger {
 
                 } else {
                     console.log(`${time}: ${module}: ${type}: ${message}`)
+                    console.log(JSON.stringify(context, null, 4) + '\n')
                 }
             } catch (err) {
                 console.log(`Exception in emitting log message: ${message}`)
